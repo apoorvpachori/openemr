@@ -19,8 +19,10 @@ use OpenEMR\Common\Session\SessionWrapperFactory;
  *
  * Request flow:
  *   Browser (fetch POST) → public/ajax.php → ChatController::handleRequest()
- *       → [validate] → [audit log] → stub response (Step 1)
- *       → [Python service call added in Step 3]
+ *       → [validate] → [audit log] → callAiService() → Python /chat → JSON response
+ *
+ * The AI service URL defaults to http://ai:8001 (Docker service name on the shared
+ * network). Override with the AI_SERVICE_URL environment variable for other envs.
  */
 class ChatController
 {
@@ -114,16 +116,123 @@ class ChatController
             'ai-copilot'         // which feature within OpenEMR
         );
 
-        // ── RESPONSE (Step 1 stub) ────────────────────────────────────────────────
-        // In Step 1 we echo the message back to confirm the full pipeline works:
-        //   Browser → PHP validation → audit log → JSON response → UI renders it.
-        // This stub is replaced with the Python service call in Step 3.
-        $this->sendSuccess([
-            'answer'    => 'Echo: ' . $message,
-            'citations' => [],
-            'status'    => 'pass',
-            'warnings'  => [],
+        // ── CALL AI SERVICE ──────────────────────────────────────────────────────
+        // All guards have passed. Forward the validated, sanitized request to Python.
+        // context is empty here — PatientContextService fills it in Step 4.
+        $aiResponse = $this->callAiService($pid, $this->authUser, $message);
+        $this->sendSuccess($aiResponse);
+    }
+
+    /**
+     * Make an HTTP POST to the Python AI service and return a normalised response array.
+     *
+     * Failure modes handled here (never let an exception reach the browser):
+     *   - Connection refused / DNS failure  → service unreachable message
+     *   - Timeout (>10s)                    → timeout message
+     *   - Non-200 HTTP status from Python   → surface the error body
+     *   - Response body is not valid JSON   → generic error message
+     *
+     * We intentionally do NOT log the message or the response here — both can
+     * contain PHI. The audit log entry (written above) captures access metadata only.
+     *
+     * @param int    $pid      Patient ID (from session, already validated)
+     * @param string $authUser OpenEMR username (from session)
+     * @param string $message  Sanitized physician question
+     * @return array<string, mixed> Normalised response ready for sendSuccess()
+     */
+    private function callAiService(int $pid, string $authUser, string $message): array
+    {
+        // AI_SERVICE_URL env var lets us point at a different host in production
+        // without changing code. Default is the Docker service name on the shared network.
+        $baseUrl = rtrim((string)(getenv('AI_SERVICE_URL') ?: 'http://ai:8001'), '/');
+        $endpoint = $baseUrl . '/chat';
+
+        // Build the JSON payload that matches app/models/chat.py → ChatRequest.
+        // context is an empty object for now; Step 4 populates it with real patient data.
+        $payload = json_encode([
+            'pid'       => $pid,
+            'auth_user' => $authUser,
+            'message'   => $message,
+            'context'   => new \stdClass(), // serialises to {} — matches PatientContext defaults
         ]);
+
+        // ── cURL setup ───────────────────────────────────────────────────────────
+        // We use cURL directly (no Guzzle) because it's always available in PHP
+        // and gives us precise control over timeouts without extra dependencies.
+        $ch = curl_init($endpoint);
+        curl_setopt_array($ch, [
+            CURLOPT_POST           => true,
+            CURLOPT_POSTFIELDS     => $payload,
+            CURLOPT_HTTPHEADER     => ['Content-Type: application/json', 'Accept: application/json'],
+            CURLOPT_RETURNTRANSFER => true,   // return response as string, don't print it
+            // CONNECTTIMEOUT: how long to wait while establishing the TCP connection.
+            // 3s is generous for an internal Docker network — if it takes longer the
+            // service is either down or severely overloaded.
+            CURLOPT_CONNECTTIMEOUT => 3,
+            // TIMEOUT: total max time for the entire request (connect + transfer).
+            // Our latency budget is <5s for the AI response; 10s gives headroom for
+            // a slow LLM call without hanging the physician's browser indefinitely.
+            CURLOPT_TIMEOUT        => 10,
+        ]);
+
+        $rawResponse = curl_exec($ch);
+        $httpCode    = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $curlErrno   = curl_errno($ch);
+        $curlError   = curl_error($ch);
+        // Note: curl_close() is deprecated since PHP 8.5 (no-op since 8.0).
+        // The handle is freed automatically when $ch goes out of scope.
+
+        // ── Handle cURL-level failures ────────────────────────────────────────────
+        // These happen before any HTTP response is received: the service is down,
+        // the hostname doesn't resolve, or the connection timed out.
+        if ($rawResponse === false || $curlErrno !== 0) {
+            // CURLE_OPERATION_TIMEDOUT = 28
+            $isTimeout = ($curlErrno === 28);
+            return [
+                'answer'    => $isTimeout
+                    ? 'The AI service took too long to respond. Please try again.'
+                    : 'The AI service is temporarily unavailable. Please try again.',
+                'citations' => [],
+                'status'    => 'fail',
+                'warnings'  => [$curlError],
+            ];
+        }
+
+        // ── Parse the JSON body ───────────────────────────────────────────────────
+        $decoded = json_decode($rawResponse, true);
+
+        if (!is_array($decoded)) {
+            // Response arrived but isn't valid JSON — Python crashed mid-response
+            // or something upstream (nginx, Docker) returned an HTML error page.
+            return [
+                'answer'    => 'The AI service returned an unexpected response.',
+                'citations' => [],
+                'status'    => 'fail',
+                'warnings'  => ['Non-JSON response from AI service (HTTP ' . $httpCode . ')'],
+            ];
+        }
+
+        // ── Handle non-200 HTTP status codes ─────────────────────────────────────
+        // 422 = Pydantic validation error (payload shape mismatch — our bug)
+        // 500 = unhandled exception in Python (caught by global_exception_handler)
+        if ($httpCode !== 200) {
+            return [
+                'answer'    => $decoded['answer'] ?? 'The AI service returned an error.',
+                'citations' => [],
+                'status'    => 'fail',
+                'warnings'  => $decoded['warnings'] ?? ['AI service error (HTTP ' . $httpCode . ')'],
+            ];
+        }
+
+        // ── Success — normalise the response fields ───────────────────────────────
+        // Use null-coalescing defaults so a partial Python response never causes
+        // PHP notices or undefined-index errors that would break the JSON output.
+        return [
+            'answer'    => (string)($decoded['answer']              ?? ''),
+            'citations' => (array)($decoded['citations']            ?? []),
+            'status'    => (string)($decoded['verification_status'] ?? 'pass'),
+            'warnings'  => (array)($decoded['warnings']             ?? []),
+        ];
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────────
