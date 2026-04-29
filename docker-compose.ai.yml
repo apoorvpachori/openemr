@@ -1,0 +1,47 @@
+services:
+  ai:
+    build:
+      context: ./ai-service
+      dockerfile: Dockerfile
+    container_name: openemr_ai
+    # Volume mount: maps ./ai-service on your Mac into /app inside the container.
+    # Combined with uvicorn --reload, any .py file edit on your Mac is picked up
+    # by the running server instantly — no rebuild needed during development.
+    volumes:
+      - ./ai-service:/app
+    ports:
+      # Expose 8001 on the host so you can curl/test from your Mac directly.
+      # Inside the Docker network, the PHP bridge reaches this service as
+      # http://ai:8001 (using the service name, not localhost).
+      - "8001:8001"
+    environment:
+      # AI provider keys — loaded from your .env file (never committed to git).
+      # These are empty in Step 2; they become required in Step 5 when the
+      # LangGraph agent starts making real LLM calls.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      LANGSMITH_API_KEY: ${LANGSMITH_API_KEY:-}
+      # LangSmith tracing — set to "true" in Step 7 to enable full agent traces.
+      LANGCHAIN_TRACING_V2: ${LANGCHAIN_TRACING_V2:-false}
+      LANGCHAIN_PROJECT: ${LANGCHAIN_PROJECT:-clinical-copilot-mvp}
+    # Restart the container if it crashes (e.g., Python syntax error on reload).
+    restart: unless-stopped
+    # Health check: Docker will mark the container as "healthy" once /health
+    # returns 200. The PHP bridge can use this to check the service is ready.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    networks:
+      - openemr_net
+
+networks:
+  openemr_net:
+    # Join the existing network created by docker/development-easy/docker-compose.yml.
+    # This is what allows the PHP container (openemr) to reach the AI container (ai)
+    # using the service name: http://ai:8001
+    # Without this, the two compose stacks would be on separate networks and
+    # ChatController.php could not reach the Python service.
+    external: true
+    name: development-easy_default

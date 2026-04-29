@@ -1,0 +1,15 @@
+# Web framework + ASGI server
+fastapi==0.115.12
+uvicorn[standard]==0.34.2
+
+# HTTP client — used in Step 3 to call OpenEMR endpoints from Python
+httpx==0.28.1
+
+# AI layer — wired in Steps 5-7
+anthropic==0.52.0
+langgraph==0.4.1
+langchain-anthropic==0.3.10
+langsmith==0.3.42
+
+# Data validation (FastAPI uses this internally; also used for agent state models)
+pydantic==2.11.4
