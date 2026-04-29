@@ -63,6 +63,80 @@ npm run build
 composer dump-autoload -o
 ```
 
+---
+
+## Clinical Co-Pilot — Fork Setup & Deployment
+
+This fork extends OpenEMR with an AI-powered Clinical Co-Pilot. See [NOTES.md](NOTES.md) for architecture decisions and [ARCHITECTURE.md](ARCHITECTURE.md) for the full integration plan.
+
+### Local Development
+
+```bash
+# 1. Clone and enter the dev docker environment
+git clone https://github.com/YOUR_USERNAME/openemr.git
+cd openemr/docker/development-easy
+
+# 2. Start all containers
+docker compose up -d
+
+# 3. Build PHP and JS assets (required on first run — not automatic in dev mode)
+cd ../..
+docker run --rm -v $(pwd):/app -w /app composer:2 install --ignore-platform-reqs --no-interaction
+docker compose -f docker/development-easy/docker-compose.yml exec openemr bash -c \
+  "cd /var/www/localhost/htdocs/openemr && npm install && node_modules/.bin/gulp -b"
+
+# 4. Load demo patient data
+docker compose -f docker/development-easy/docker-compose.yml exec openemr \
+  /root/devtools dev-reset-install-demodata
+
+# 5. Generate synthetic patients for testing
+docker compose -f docker/development-easy/docker-compose.yml exec openemr \
+  /root/devtools import-random-patients 30
+```
+
+Access at **http://localhost:8300/** — login: `admin` / `pass`
+
+### Production Deployment (DigitalOcean Droplet)
+
+Deployed using the same development Docker environment on a public server.
+See the step-by-step guide below.
+
+**Prerequisites:** A DigitalOcean Droplet running Ubuntu 22.04, 2GB RAM, with your SSH key added.
+
+```bash
+# --- On the Droplet (SSH in first) ---
+
+# 1. Install Docker
+curl -fsSL https://get.docker.com | sh
+
+# 2. Clone your fork
+git clone https://github.com/YOUR_USERNAME/openemr.git
+cd openemr/docker/development-easy
+
+# 3. Start all containers
+docker compose up -d
+
+# 4. Build assets (same as local setup)
+cd ../..
+docker run --rm -v $(pwd):/app -w /app composer:2 install --ignore-platform-reqs --no-interaction
+docker compose -f docker/development-easy/docker-compose.yml exec openemr bash -c \
+  "cd /var/www/localhost/htdocs/openemr && npm install && node_modules/.bin/gulp -b"
+
+# 5. Load demo data
+docker compose -f docker/development-easy/docker-compose.yml exec openemr \
+  /root/devtools dev-reset-install-demodata
+```
+
+Access at **http://YOUR_DROPLET_IP:8300** — login: `admin` / `pass`
+
+**Updating after code changes:**
+```bash
+ssh root@YOUR_DROPLET_IP
+cd openemr
+git pull
+docker compose -f docker/development-easy/docker-compose.yml restart openemr
+```
+
 ### Contributors
 
 This project exists thanks to all the people who have contributed. [[Contribute]](CONTRIBUTING.md).
