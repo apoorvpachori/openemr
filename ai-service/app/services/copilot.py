@@ -1,8 +1,6 @@
 import logging
 
-from langchain_core.messages import ToolMessage
-
-from app.agent.graph import build_agent
+from app.agent.graph import build_graph
 from app.models.chat import ChatRequest, ChatResponse, Citation
 from app.tools.patient_tools import make_patient_tools
 
@@ -17,49 +15,30 @@ async def handle_chat(request: ChatRequest) -> ChatResponse:
         len(request.message),
     )
 
-    # Step 1: create tools scoped to this patient.
-    # The closures lock in pid + internal_token — the agent cannot query a different patient.
+    # Tools are scoped to this patient — pid and token baked into closures.
     tools = make_patient_tools(request.pid, request.internal_token)
 
-    # Step 2: build the agent with those tools and run it.
-    # The config passed to ainvoke is forwarded to LangSmith as trace metadata.
-    # - run_name:  gives every trace a readable name in the dashboard
-    # - metadata:  who queried which patient — filterable in LangSmith
-    # - tags:      group traces by type for dashboard filtering
-    # Note: we log auth_user and pid (system identifiers) but NOT the message
-    # text or tool results — those contain PHI and stay inside the trace only.
-    agent = build_agent(tools)
-    result = await agent.ainvoke(
+    # Build the outer graph (agent → verify → sanitize/fallback).
+    graph = build_graph(tools)
+
+    result = await graph.ainvoke(
         {"messages": [("user", request.message)]},
         config={
             "run_name": "clinical-copilot-query",
-            "metadata": {
-                "auth_user": request.auth_user,
-                "pid": request.pid,
-            },
+            "metadata": {"auth_user": request.auth_user, "pid": request.pid},
             "tags": ["patient-query", "clinical-copilot"],
         },
     )
 
-    # Step 3: the last message in the result is always the agent's final answer.
-    answer = result["messages"][-1].content
-
-    # Step 4: extract which tools were actually called during this run.
-    # ToolMessages are the responses from tool calls — their .name is the tool name.
-    # This gives us a simple citation list showing what data the answer drew from.
-    tools_called = [
-        msg.name
-        for msg in result["messages"]
-        if isinstance(msg, ToolMessage)
-    ]
+    # Citations: one entry per tool that was actually called during this run.
     citations = [
         Citation(type=name.replace("get_", "").replace("_", " "), title=name)
-        for name in tools_called
+        for name in result.get("tool_results", {}).keys()
     ]
 
     return ChatResponse(
-        answer=answer,
+        answer=result["answer"],
         citations=citations,
-        verification_status="pass",
-        warnings=[],
+        verification_status=result.get("verification_status", "pass"),
+        warnings=result.get("warnings", []),
     )
