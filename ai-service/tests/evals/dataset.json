@@ -1,0 +1,72 @@
+[
+  {
+    "id": "med-pid1",
+    "pid": 1,
+    "question": "What medications is this patient on?",
+    "required_keywords": ["Norvasc", "Lisinopril"],
+    "description": "Medication list — pid=1 Phil Belford"
+  },
+  {
+    "id": "allergy-pid1",
+    "pid": 1,
+    "question": "Does this patient have any known allergies?",
+    "required_keywords": ["penicillin"],
+    "description": "Allergy check — pid=1"
+  },
+  {
+    "id": "problems-pid1",
+    "pid": 1,
+    "question": "What are this patient's active medical problems?",
+    "required_keywords": ["HTN", "renal"],
+    "description": "Problem list — pid=1 (HTN + Chronic Renal Insufficiency)"
+  },
+  {
+    "id": "dob-pid1",
+    "pid": 1,
+    "question": "What is this patient's date of birth?",
+    "required_keywords": ["1972"],
+    "description": "Demographics DOB — pid=1"
+  },
+  {
+    "id": "sex-pid1",
+    "pid": 1,
+    "question": "Is this patient male or female?",
+    "required_keywords": ["male"],
+    "description": "Demographics sex — pid=1"
+  },
+  {
+    "id": "name-pid1",
+    "pid": 1,
+    "question": "What is this patient's full name?",
+    "required_keywords": ["Phil", "Belford"],
+    "description": "Demographics name — pid=1"
+  },
+  {
+    "id": "med-pid2",
+    "pid": 2,
+    "question": "What medications is this patient on?",
+    "required_keywords": ["Metformin", "Lipitor"],
+    "description": "Medication list — pid=2 Susan Underwood"
+  },
+  {
+    "id": "problems-pid2",
+    "pid": 2,
+    "question": "What medical conditions does this patient have?",
+    "required_keywords": ["diabetes"],
+    "description": "Problem list — pid=2"
+  },
+  {
+    "id": "no-labs-pid1",
+    "pid": 1,
+    "question": "Does this patient have any lab results on file?",
+    "required_keywords": ["no"],
+    "description": "Missing data graceful response — labs — pid=1"
+  },
+  {
+    "id": "summary-pid1",
+    "pid": 1,
+    "question": "Give me a brief summary of this patient's active medications and problems.",
+    "required_keywords": ["Norvasc", "HTN"],
+    "description": "Multi-fact summary — pid=1"
+  }
+]

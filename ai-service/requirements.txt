@@ -15,3 +15,7 @@ langsmith==0.7.38
 
 # Data validation (FastAPI uses this internally; also used for agent state models)
 pydantic==2.11.4
+
+# Testing
+pytest==8.3.5
+pytest-asyncio==0.24.0
