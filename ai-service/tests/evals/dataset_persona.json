@@ -1,0 +1,58 @@
+[
+  {
+    "id": "catchup-pid1",
+    "pid": 1,
+    "question": "Catch me up on this patient before I walk in.",
+    "required_keywords": ["Norvasc", "HTN", "penicillin"],
+    "description": "Use Case 1 (between-room prep): multi-domain synthesis. Dr. Chen's primary question."
+  },
+  {
+    "id": "previsit-priority-pid1",
+    "pid": 1,
+    "question": "What are the most important things I need to know about this patient right now?",
+    "required_keywords": ["Norvasc", "HTN"],
+    "description": "Use Case 1: prioritized pre-visit summary — agent should surface active problems and meds."
+  },
+  {
+    "id": "nsaid-concern-pid1",
+    "pid": 1,
+    "question": "Are there any conditions I should consider before prescribing NSAIDs to this patient?",
+    "required_keywords": ["renal"],
+    "description": "Use Case 3 (medication context): Chronic Renal Insufficiency is an NSAID contraindication — agent must surface it."
+  },
+  {
+    "id": "allergy-preorder-pid1",
+    "pid": 1,
+    "question": "Any drug allergies I need to know before ordering today?",
+    "required_keywords": ["penicillin"],
+    "description": "Use Case 3: allergy check phrased as Dr. Chen would ask between rooms, not as a generic lookup."
+  },
+  {
+    "id": "bp-treatment-pid1",
+    "pid": 1,
+    "question": "Is this patient's hypertension being managed medically?",
+    "required_keywords": ["Norvasc"],
+    "description": "Use Case 1/3: connecting a problem (HTN) to its treatment (medications) — requires reasoning across two data sources."
+  },
+  {
+    "id": "bp-med-connection-pid1",
+    "pid": 1,
+    "question": "What is this patient on for their blood pressure?",
+    "required_keywords": ["Norvasc", "Lisinopril"],
+    "description": "Use Case 3: clinical reasoning — connects a condition-specific question (blood pressure) to the medication list, requires more than a simple lookup."
+  },
+  {
+    "id": "summary-pid2",
+    "pid": 2,
+    "question": "Give me a quick pre-visit summary for this patient.",
+    "required_keywords": ["Metformin", "diabetes"],
+    "description": "Use Case 1: between-room prep for pid=2 (Susan Underwood, diabetic). Same workflow, different patient."
+  },
+  {
+    "id": "labs-review-pid1",
+    "pid": 1,
+    "question": "What labs are back for this patient? Anything I should act on?",
+    "required_keywords": ["no"],
+    "description": "Use Case 2 (lab review): patient has no labs — agent must say so clearly, not hallucinate results."
+  }
+]

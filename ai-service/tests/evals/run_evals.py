@@ -4,7 +4,7 @@ LangSmith behavioral evaluation suite for the Clinical Co-Pilot.
 
 How it works
 ------------
-1. Loads 10 ground-truth cases from dataset.json.
+1. Loads ground-truth cases from a dataset JSON file.
    Each case has a question, the patient's pid, and a list of keywords
    that MUST appear in a correct answer.
 
@@ -35,8 +35,26 @@ Usage
 
   # Against deployed service:
   AI_SERVICE_URL=http://104.248.217.251:8001 python tests/evals/run_evals.py
+
+
+Datasets
+--------
+  dataset.json         — factual retrieval (basic correctness)
+  dataset_persona.json — Dr. Sarah Chen's real workflow questions (USERS.md)
+
+Usage
+-----
+  # Basic factual evals (default):
+  python tests/evals/run_evals.py
+
+  # Persona-grounded evals (USERS.md use cases):
+  python tests/evals/run_evals.py --dataset dataset_persona.json
+
+  # Against deployed service:
+  AI_SERVICE_URL=http://104.248.217.251:8001 python tests/evals/run_evals.py
 """
 
+import argparse
 import asyncio
 import hashlib
 import hmac
@@ -57,10 +75,13 @@ from langsmith import Client
 AI_SERVICE_URL = os.getenv("AI_SERVICE_URL", "http://localhost:8001")
 HMAC_SECRET = os.getenv("COPILOT_HMAC_SECRET", "dev-hmac-secret")
 LANGSMITH_PROJECT = os.getenv("LANGCHAIN_PROJECT", "clinical-copilot")
-DATASET_NAME = "clinical-copilot-ground-truth"
 PASS_THRESHOLD = 0.8   # 80% of cases must score >= 0.5 to pass
 
-DATASET_PATH = Path(__file__).parent / "dataset.json"
+EVALS_DIR = Path(__file__).parent
+
+# Dataset name in LangSmith is derived from the file name at runtime.
+# dataset.json         → "clinical-copilot-ground-truth"
+# dataset_persona.json → "clinical-copilot-persona"
 
 
 # ── Token generation ──────────────────────────────────────────────────────────
@@ -153,18 +174,17 @@ Reply with JSON only, no extra text:
 
 # ── LangSmith dataset setup ───────────────────────────────────────────────────
 
-def ensure_langsmith_dataset(client: Client, cases: list[dict]) -> str:
+def ensure_langsmith_dataset(client: Client, cases: list[dict], dataset_name: str) -> str:
     """
-    Create the ground-truth dataset in LangSmith if it doesn't exist yet.
+    Create the named dataset in LangSmith if it doesn't exist yet.
     If it already exists, returns the existing dataset ID.
-    Returns the dataset ID.
     """
     try:
         dataset = client.create_dataset(
-            DATASET_NAME,
-            description="Clinical Co-Pilot ground truth Q&A pairs for behavioral eval",
+            dataset_name,
+            description="Clinical Co-Pilot Q&A pairs for behavioral eval",
         )
-        print(f"[langsmith] Created dataset '{DATASET_NAME}' (id={dataset.id})")
+        print(f"[langsmith] Created dataset '{dataset_name}' (id={dataset.id})")
 
         client.create_examples(
             inputs=[{"pid": c["pid"], "question": c["question"]} for c in cases],
@@ -177,17 +197,29 @@ def ensure_langsmith_dataset(client: Client, cases: list[dict]) -> str:
 
     except Exception:
         # Dataset already exists — look it up
-        datasets = list(client.list_datasets(dataset_name=DATASET_NAME))
+        datasets = list(client.list_datasets(dataset_name=dataset_name))
         if datasets:
-            print(f"[langsmith] Dataset '{DATASET_NAME}' already exists (id={datasets[0].id})")
+            print(f"[langsmith] Dataset '{dataset_name}' already exists (id={datasets[0].id})")
             return str(datasets[0].id)
         raise
 
 
 # ── Main eval loop ────────────────────────────────────────────────────────────
 
-async def run_evals() -> None:
-    cases = json.loads(DATASET_PATH.read_text())
+async def run_evals(dataset_path: Path) -> None:
+    if not dataset_path.exists():
+        print(f"ERROR: Dataset not found: {dataset_path}")
+        sys.exit(1)
+
+    # Derive LangSmith dataset name from filename
+    # dataset.json → "clinical-copilot-ground-truth"
+    # dataset_persona.json → "clinical-copilot-persona"
+    stem = dataset_path.stem  # e.g. "dataset" or "dataset_persona"
+    suffix = stem.replace("dataset", "").lstrip("_") or "ground-truth"
+    langsmith_dataset_name = f"clinical-copilot-{suffix}"
+
+    cases = json.loads(dataset_path.read_text())
+    print(f"Dataset: {dataset_path.name}  ({len(cases)} cases)")
 
     # Verify service is up before starting
     async with httpx.AsyncClient(timeout=5.0) as client:
@@ -199,7 +231,7 @@ async def run_evals() -> None:
             sys.exit(1)
 
     langsmith_client = Client()
-    dataset_id = ensure_langsmith_dataset(langsmith_client, cases)
+    dataset_id = ensure_langsmith_dataset(langsmith_client, cases, langsmith_dataset_name)
 
     # Experiment name — includes timestamp so each run is distinct in LangSmith
     experiment_name = f"eval-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}"
@@ -280,7 +312,7 @@ async def run_evals() -> None:
             print(f"    Required: {r['case']['required_keywords']}")
             print(f"    Answer:   {r['answer'][:120]}...")
 
-    print(f"\nLangSmith experiment '{experiment_name}' logged to project '{LANGSMITH_PROJECT}'")
+    print(f"\nLangSmith experiment '{experiment_name}' logged to project '{LANGSMITH_PROJECT}' (dataset: {langsmith_dataset_name})")
 
     if pass_rate < PASS_THRESHOLD:
         print(f"\nFAILED: pass rate {pass_rate:.0%} is below threshold {PASS_THRESHOLD:.0%}")
@@ -290,4 +322,11 @@ async def run_evals() -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(run_evals())
+    parser = argparse.ArgumentParser(description="Run Clinical Co-Pilot behavioral evals")
+    parser.add_argument(
+        "--dataset",
+        default="dataset.json",
+        help="Dataset file to run (default: dataset.json). Use dataset_persona.json for USERS.md persona evals.",
+    )
+    args = parser.parse_args()
+    asyncio.run(run_evals(EVALS_DIR / args.dataset))
