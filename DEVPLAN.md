@@ -442,18 +442,37 @@ Note: `context` is gone — the fetch node populates `tool_results` directly fro
 
 ---
 
-### Step 6 — Verification Node (Source Attribution)
+### Step 6 — LangSmith Observability
 
-**Goal:** Every claim in the response has a traceable citation. Unverifiable claims are stripped or flagged.
+**Goal:** Every agent run has a full trace in LangSmith showing each node, latency, token cost, and any tool failures.
+
+**Files to modify:**
+- `docker-compose.ai.yml` — set `LANGCHAIN_TRACING_V2: "true"` (already present, just needs enabling)
+- `ai-service/app/agent/graph.py` — LangGraph traces to LangSmith automatically when env vars are set; no code changes needed
+
+LangSmith traces capture (from ARCHITECTURE.md §10):
+- What happened in what order
+- How long each node took
+- Which tools ran / failed
+- Token count and cost per run
+- Full prompt and response text
+
+**Verification:** Submit a question → check LangSmith dashboard → trace visible with all nodes and timing.
+
+---
+
+### Step 7 — Verification Node (Source Attribution)
+
+**Goal:** Every claim in the response has a traceable citation. Unverifiable claims are stripped or flagged. Uses LangSmith traces from Step 6 to observe and tune the verification logic.
 
 **Already scaffolded in Step 5.** This step is about hardening the verify node logic:
 
 - Extract atomic claims from draft text
-- For each claim, search `tool_output` for supporting data
+- For each claim, search tool results for supporting data
 - If found → `supported: true`, attach citation (record type + id/index + key field)
 - If not found → `supported: false`
 - If any unsupported → route to `sanitize` node
-- If Claude produces a claim about a medication not in `tool_results["medications"]` → strip it
+- If model produces a claim about a medication not in `tool_results["medications"]` → strip it
 
 Minimum response contract (from ARCHITECTURE.md §8):
 ```json
@@ -465,26 +484,7 @@ Minimum response contract (from ARCHITECTURE.md §8):
 }
 ```
 
-**Verification:** Manually inject a false claim into the draft → verify node strips it before response reaches user.
-
----
-
-### Step 7 — LangSmith Observability
-
-**Goal:** Every agent run has a full trace in LangSmith showing each node, latency, token cost, and any tool failures.
-
-**Files to modify:**
-- `ai-service/agent/graph.py` — LangGraph natively traces to LangSmith when `LANGSMITH_API_KEY` and `LANGCHAIN_TRACING_V2=true` env vars are set. No code changes needed beyond env vars.
-- `docker-compose.ai.yml` — add `LANGCHAIN_TRACING_V2: "true"` and `LANGCHAIN_PROJECT: "clinical-copilot-mvp"` to env
-
-LangSmith traces answer (from ARCHITECTURE.md §10):
-- What happened in what order
-- How long each node took
-- Which tools ran / failed
-- Token count and cost per run
-- Fallback events
-
-**Verification:** Submit a question → check LangSmith dashboard → trace visible with all nodes and timing.
+**Verification:** Manually inject a false claim into the draft → verify node strips it before response reaches user. Confirm in LangSmith trace that the sanitize node fired.
 
 ---
 
@@ -545,10 +545,10 @@ ai-service/tests/
 | Step 1 — Module scaffold + UI | ✅ Complete | — | MVP (Apr 29) |
 | Step 2 — Python service + Docker | ✅ Complete | — | MVP (Apr 29) |
 | Step 3 — PHP → Python connection | ✅ Complete | — | MVP (Apr 29) |
-| Step 4 — Python data tools (MySQL) | 🔲 Next | Today | MVP (Apr 29) |
-| Step 5 — LangGraph agent | 🔲 | Today | MVP (Apr 29) |
-| Step 6 — Verification node | 🔲 | Today | MVP (Apr 29) |
-| Step 7 — LangSmith observability | 🔲 | Today | MVP (Apr 29) |
+| Step 4 — HMAC proxy + Python data tools | ✅ Complete | — | MVP (Apr 29) |
+| Step 5 — LangGraph agent | ✅ Complete | — | MVP (Apr 29) |
+| Step 6 — LangSmith observability | 🔲 Next | Today | MVP (Apr 29) |
+| Step 7 — Verification node | 🔲 | Today | MVP (Apr 29) |
 | Step 8 — Eval framework | 🔲 | May 1 | Early Submission |
 | Step 9 — Deploy | 🔲 | May 1 | Early Submission |
 

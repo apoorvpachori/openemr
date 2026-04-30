@@ -22,8 +22,24 @@ async def handle_chat(request: ChatRequest) -> ChatResponse:
     tools = make_patient_tools(request.pid, request.internal_token)
 
     # Step 2: build the agent with those tools and run it.
+    # The config passed to ainvoke is forwarded to LangSmith as trace metadata.
+    # - run_name:  gives every trace a readable name in the dashboard
+    # - metadata:  who queried which patient — filterable in LangSmith
+    # - tags:      group traces by type for dashboard filtering
+    # Note: we log auth_user and pid (system identifiers) but NOT the message
+    # text or tool results — those contain PHI and stay inside the trace only.
     agent = build_agent(tools)
-    result = await agent.ainvoke({"messages": [("user", request.message)]})
+    result = await agent.ainvoke(
+        {"messages": [("user", request.message)]},
+        config={
+            "run_name": "clinical-copilot-query",
+            "metadata": {
+                "auth_user": request.auth_user,
+                "pid": request.pid,
+            },
+            "tags": ["patient-query", "clinical-copilot"],
+        },
+    )
 
     # Step 3: the last message in the result is always the agent's final answer.
     answer = result["messages"][-1].content

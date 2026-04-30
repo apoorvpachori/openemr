@@ -21,8 +21,10 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       LANGSMITH_API_KEY: ${LANGSMITH_API_KEY:-}
-      # LangSmith tracing — set to "true" in Step 7 to enable full agent traces.
-      LANGCHAIN_TRACING_V2: ${LANGCHAIN_TRACING_V2:-false}
+      # LangSmith tracing — captures every node, LLM call, tool invocation,
+      # token count, and latency. Traces appear in smith.langchain.com under
+      # the project name below. Requires LANGSMITH_API_KEY to be set.
+      LANGCHAIN_TRACING_V2: ${LANGCHAIN_TRACING_V2:-true}
       LANGCHAIN_PROJECT: ${LANGCHAIN_PROJECT:-clinical-copilot-mvp}
       # HMAC shared secret — must match COPILOT_HMAC_SECRET in the openemr container.
       # Python tools use this indirectly: ChatController signs with it, api.php verifies it.
