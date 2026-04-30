@@ -2,7 +2,7 @@
 CopilotService — business logic layer.
 
 Routes are thin HTTP handlers. This module owns what actually happens with a
-request. Right now that's an echo stub. In Step 5 this becomes a LangGraph
+request. Right now that's a tool-probe stub. In Step 5 this becomes a LangGraph
 agent invocation.
 
 Keeping logic here (not in the route) means:
@@ -14,6 +14,7 @@ Keeping logic here (not in the route) means:
 import logging
 
 from app.models.chat import ChatRequest, ChatResponse
+from app.tools.patient_tools import make_patient_tools
 
 logger = logging.getLogger("copilot.service")
 
@@ -22,12 +23,13 @@ async def handle_chat(request: ChatRequest) -> ChatResponse:
     """
     Process a chat request and return a response.
 
-    Step 2 (now): echo stub — confirms the PHP→Python pipeline works and shows
-    what context fields are arriving so we can verify Step 4's PHP data fetch.
+    Step 4 (now): calls all six patient data tools to verify the HMAC proxy
+    pipeline works end-to-end. Returns a summary of each tool's status so you
+    can confirm real data is flowing before wiring up the LangGraph agent.
 
     Step 5: replaced with `await agent.run(request)` — a full LangGraph graph
-    that routes the question, calls tools, synthesizes with Claude, verifies
-    claims, and returns a cited response.
+    that routes the question, calls the relevant tools, synthesizes with Claude,
+    verifies claims, and returns a cited response.
     """
     logger.info(
         "Processing chat  pid=%s  user=%s  msg_len=%d",
@@ -36,26 +38,27 @@ async def handle_chat(request: ChatRequest) -> ChatResponse:
         len(request.message),
     )
 
-    # Build a summary of which context fields arrived — useful for debugging
-    # Step 4 (PatientContextService.php) to confirm PHP is sending data correctly.
-    ctx = request.context
-    context_summary = (
-        f"encounters={len(ctx.encounters)}, "
-        f"meds={len(ctx.medications)}, "
-        f"problems={len(ctx.problems)}, "
-        f"labs={len(ctx.labs)}, "
-        f"allergies={len(ctx.allergies)}"
-    )
+    # Build tools scoped to this request's pid and auth token.
+    # The closures ensure the LLM (in Step 5) cannot change which patient
+    # is queried — pid and token are baked in at this point.
+    tools = make_patient_tools(request.pid, request.internal_token)
+
+    # Call every tool to verify the HMAC proxy works for all data types.
+    # In Step 5 only the relevant tools run (selected by the router node).
+    tool_statuses: dict[str, str] = {}
+    for tool_fn in tools:
+        result = await tool_fn.ainvoke({})
+        tool_statuses[tool_fn.name] = result.get("status", "unknown")
+
+    status_line = ", ".join(f"{k}={v}" for k, v in tool_statuses.items())
+    all_ok = all(s in ("ok", "no_data") for s in tool_statuses.values())
 
     return ChatResponse(
         answer=(
-            f"[Python echo] pid={request.pid} | "
-            f"user={request.auth_user} | "
-            f"msg='{request.message}' | "
-            f"context: {context_summary}"
+            f"[Step 4 stub] pid={request.pid} | {status_line}\n\n"
+            f"Message received: '{request.message}'\n"
+            f"{'All tools reachable — ready for Step 5.' if all_ok else 'Some tools failed — check Python logs.'}"
         ),
-        verification_status="pass",
-        # The warning tells whoever is testing that this is still the stub,
-        # not a real agent response.
-        warnings=["Step 2 stub — LangGraph agent not yet connected"],
+        verification_status="pass" if all_ok else "fail",
+        warnings=["Step 4 stub — LangGraph agent not yet connected"],
     )

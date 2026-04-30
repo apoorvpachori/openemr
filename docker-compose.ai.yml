@@ -16,13 +16,20 @@ services:
       - "8001:8001"
     environment:
       # AI provider keys — loaded from your .env file (never committed to git).
-      # These are empty in Step 2; they become required in Step 5 when the
+      # These are empty in Step 4; they become required in Step 5 when the
       # LangGraph agent starts making real LLM calls.
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       LANGSMITH_API_KEY: ${LANGSMITH_API_KEY:-}
       # LangSmith tracing — set to "true" in Step 7 to enable full agent traces.
       LANGCHAIN_TRACING_V2: ${LANGCHAIN_TRACING_V2:-false}
       LANGCHAIN_PROJECT: ${LANGCHAIN_PROJECT:-clinical-copilot-mvp}
+      # HMAC shared secret — must match COPILOT_HMAC_SECRET in the openemr container.
+      # Python tools use this indirectly: ChatController signs with it, api.php verifies it.
+      # Set a strong random value in .env for production. The default is dev-only.
+      COPILOT_HMAC_SECRET: ${COPILOT_HMAC_SECRET:-dev-hmac-secret}
+      # URL of the OpenEMR PHP container on the shared Docker network.
+      # Python tools call back to api.php at this base URL.
+      OPENEMR_INTERNAL_URL: ${OPENEMR_INTERNAL_URL:-http://openemr:80}
     # Restart the container if it crashes (e.g., Python syntax error on reload).
     restart: unless-stopped
     # Health check: Docker will mark the container as "healthy" once /health

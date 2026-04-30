@@ -5,28 +5,11 @@ These models do two things:
 1. Validate incoming data automatically (FastAPI returns 422 if shape is wrong)
 2. Document the expected structure explicitly — no guessing what PHP sends
 
-When Step 4 (PatientContextService.php) is built, the context fields here
-must match exactly what PHP packs into the JSON payload.
+PHP sends: pid, auth_user, message, internal_token.
+Python fetches all patient data itself via the HMAC-authenticated api.php proxy.
 """
 
 from pydantic import BaseModel, Field
-
-
-class PatientContext(BaseModel):
-    """
-    Structured patient data fetched by PHP from OpenEMR's DB before the request
-    reaches Python. All fields are optional — any can be absent for a new patient,
-    incomplete import, or a patient with no history in that category.
-
-    The agent (Step 5) must handle empty lists and None gracefully — never assume
-    data exists.
-    """
-    patient: dict | None = None
-    encounters: list[dict] = Field(default_factory=list)
-    medications: list[dict] = Field(default_factory=list)
-    problems: list[dict] = Field(default_factory=list)
-    allergies: list[dict] = Field(default_factory=list)
-    labs: list[dict] = Field(default_factory=list)
 
 
 class ChatRequest(BaseModel):
@@ -35,11 +18,15 @@ class ChatRequest(BaseModel):
 
     pid and auth_user come from the PHP session — not from the browser.
     PHP is the authority on identity; Python trusts what PHP sends here.
+
+    internal_token is a short-lived HMAC token (30s TTL) that allows Python
+    tools to call back to api.php and fetch patient data. It is signed over
+    "{pid}:{timestamp}" so it cannot be replayed for a different patient.
     """
     pid: int
     auth_user: str
     message: str
-    context: PatientContext = Field(default_factory=PatientContext)
+    internal_token: str
 
 
 class Citation(BaseModel):

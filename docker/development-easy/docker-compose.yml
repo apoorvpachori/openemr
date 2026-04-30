@@ -92,6 +92,10 @@ services:
       OPENEMR_SETTING_SMTP_Auth: 'TRUE'
       OPENEMR_SETTING_practice_return_email_path: 'noreply@openemr.local'
       OPENEMR_SETTING_Patient_Reminder_Sender_Name: 'OpenEMR Reminders'
+      # Clinical Co-Pilot: shared HMAC secret used by ChatController.php to sign
+      # short-lived tokens for the Python service. Must match COPILOT_HMAC_SECRET
+      # in docker-compose.ai.yml. Set a strong value in .env for production.
+      COPILOT_HMAC_SECRET: ${COPILOT_HMAC_SECRET:-dev-hmac-secret}
     depends_on:
       mysql:
         condition: service_healthy

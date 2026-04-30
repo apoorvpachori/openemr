@@ -116,10 +116,21 @@ class ChatController
             'ai-copilot'         // which feature within OpenEMR
         );
 
+        // ── HMAC INTERNAL TOKEN ───────────────────────────────────────────────────
+        // Generate a short-lived token so the Python service can call back to our
+        // internal api.php to fetch patient data. The signature covers "{pid}:{ts}"
+        // so a token for this patient cannot be replayed for a different pid, and
+        // it expires in 30 seconds — tight enough to prevent replay attacks while
+        // giving the LLM plenty of time to respond.
+        $ts            = time();
+        $hmacSecret    = (string)(getenv('COPILOT_HMAC_SECRET') ?: 'dev-hmac-secret');
+        $sig           = hash_hmac('sha256', "{$pid}:{$ts}", $hmacSecret);
+        $internalToken = "{$ts}:{$sig}";
+
         // ── CALL AI SERVICE ──────────────────────────────────────────────────────
-        // All guards have passed. Forward the validated, sanitized request to Python.
-        // context is empty here — PatientContextService fills it in Step 4.
-        $aiResponse = $this->callAiService($pid, $this->authUser, $message);
+        // All guards have passed. Forward to Python with the HMAC token so tools
+        // can call back to api.php and fetch real patient data.
+        $aiResponse = $this->callAiService($pid, $this->authUser, $message, $internalToken);
         $this->sendSuccess($aiResponse);
     }
 
@@ -140,7 +151,7 @@ class ChatController
      * @param string $message  Sanitized physician question
      * @return array<string, mixed> Normalised response ready for sendSuccess()
      */
-    private function callAiService(int $pid, string $authUser, string $message): array
+    private function callAiService(int $pid, string $authUser, string $message, string $internalToken): array
     {
         // AI_SERVICE_URL env var lets us point at a different host in production
         // without changing code. Default is the Docker service name on the shared network.
@@ -148,12 +159,13 @@ class ChatController
         $endpoint = $baseUrl . '/chat';
 
         // Build the JSON payload that matches app/models/chat.py → ChatRequest.
-        // context is an empty object for now; Step 4 populates it with real patient data.
+        // internal_token lets Python tools call back to api.php to fetch patient data.
+        // It is scoped to this pid and expires in 30 seconds.
         $payload = json_encode([
-            'pid'       => $pid,
-            'auth_user' => $authUser,
-            'message'   => $message,
-            'context'   => new \stdClass(), // serialises to {} — matches PatientContext defaults
+            'pid'            => $pid,
+            'auth_user'      => $authUser,
+            'message'        => $message,
+            'internal_token' => $internalToken,
         ]);
 
         // ── cURL setup ───────────────────────────────────────────────────────────
