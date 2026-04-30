@@ -19,6 +19,7 @@ services:
       # These are empty in Step 4; they become required in Step 5 when the
       # LangGraph agent starts making real LLM calls.
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       LANGSMITH_API_KEY: ${LANGSMITH_API_KEY:-}
       # LangSmith tracing — set to "true" in Step 7 to enable full agent traces.
       LANGCHAIN_TRACING_V2: ${LANGCHAIN_TRACING_V2:-false}

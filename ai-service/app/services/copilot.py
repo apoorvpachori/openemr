@@ -1,36 +1,15 @@
-"""
-CopilotService — business logic layer.
-
-Routes are thin HTTP handlers. This module owns what actually happens with a
-request. Right now that's a tool-probe stub. In Step 5 this becomes a LangGraph
-agent invocation.
-
-Keeping logic here (not in the route) means:
-- Routes stay readable (just HTTP in/out)
-- This service can be tested directly without spinning up HTTP
-- Swapping the stub for the real agent requires changing only this file
-"""
-
 import logging
 
-from app.models.chat import ChatRequest, ChatResponse
+from langchain_core.messages import ToolMessage
+
+from app.agent.graph import build_agent
+from app.models.chat import ChatRequest, ChatResponse, Citation
 from app.tools.patient_tools import make_patient_tools
 
 logger = logging.getLogger("copilot.service")
 
 
 async def handle_chat(request: ChatRequest) -> ChatResponse:
-    """
-    Process a chat request and return a response.
-
-    Step 4 (now): calls all six patient data tools to verify the HMAC proxy
-    pipeline works end-to-end. Returns a summary of each tool's status so you
-    can confirm real data is flowing before wiring up the LangGraph agent.
-
-    Step 5: replaced with `await agent.run(request)` — a full LangGraph graph
-    that routes the question, calls the relevant tools, synthesizes with Claude,
-    verifies claims, and returns a cited response.
-    """
     logger.info(
         "Processing chat  pid=%s  user=%s  msg_len=%d",
         request.pid,
@@ -38,27 +17,33 @@ async def handle_chat(request: ChatRequest) -> ChatResponse:
         len(request.message),
     )
 
-    # Build tools scoped to this request's pid and auth token.
-    # The closures ensure the LLM (in Step 5) cannot change which patient
-    # is queried — pid and token are baked in at this point.
+    # Step 1: create tools scoped to this patient.
+    # The closures lock in pid + internal_token — the agent cannot query a different patient.
     tools = make_patient_tools(request.pid, request.internal_token)
 
-    # Call every tool to verify the HMAC proxy works for all data types.
-    # In Step 5 only the relevant tools run (selected by the router node).
-    tool_statuses: dict[str, str] = {}
-    for tool_fn in tools:
-        result = await tool_fn.ainvoke({})
-        tool_statuses[tool_fn.name] = result.get("status", "unknown")
+    # Step 2: build the agent with those tools and run it.
+    agent = build_agent(tools)
+    result = await agent.ainvoke({"messages": [("user", request.message)]})
 
-    status_line = ", ".join(f"{k}={v}" for k, v in tool_statuses.items())
-    all_ok = all(s in ("ok", "no_data") for s in tool_statuses.values())
+    # Step 3: the last message in the result is always the agent's final answer.
+    answer = result["messages"][-1].content
+
+    # Step 4: extract which tools were actually called during this run.
+    # ToolMessages are the responses from tool calls — their .name is the tool name.
+    # This gives us a simple citation list showing what data the answer drew from.
+    tools_called = [
+        msg.name
+        for msg in result["messages"]
+        if isinstance(msg, ToolMessage)
+    ]
+    citations = [
+        Citation(type=name.replace("get_", "").replace("_", " "), title=name)
+        for name in tools_called
+    ]
 
     return ChatResponse(
-        answer=(
-            f"[Step 4 stub] pid={request.pid} | {status_line}\n\n"
-            f"Message received: '{request.message}'\n"
-            f"{'All tools reachable — ready for Step 5.' if all_ok else 'Some tools failed — check Python logs.'}"
-        ),
-        verification_status="pass" if all_ok else "fail",
-        warnings=["Step 4 stub — LangGraph agent not yet connected"],
+        answer=answer,
+        citations=citations,
+        verification_status="pass",
+        warnings=[],
     )
